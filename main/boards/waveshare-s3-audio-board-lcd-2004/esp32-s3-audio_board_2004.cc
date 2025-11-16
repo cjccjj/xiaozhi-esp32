@@ -152,7 +152,7 @@ public:
     }
 
     virtual Backlight* GetBacklight() override {
-        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, BACKLIGHT_INVERT);
+        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, false);
         return &backlight;
     }
 
