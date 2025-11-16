@@ -1,16 +1,19 @@
 #include "wifi_board.h"
 #include "codecs/box_audio_codec.h"
+#include "display/char_lcd_display.h"
 #include "system_reset.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
-#include "i2c_device.h"
-#include "led/circular_strip.h"
-#include "esp32_camera.h"
-#include "display/char_lcd_display.h"
 
 #include <esp_log.h>
+#include "i2c_device.h"
 #include <driver/i2c_master.h>
+#include <wifi_station.h>
+#include <esp_timer.h>
+#include "esp_io_expander_tca95xx_16bit.h"
+#include "esp32_camera.h"
+#include "led/circular_strip.h"
 
 #define TAG "waveshare_s3_audio_board_lcd_2004"
 
@@ -18,6 +21,7 @@ class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
     i2c_master_bus_handle_t i2c_bus_;
+    esp_io_expander_handle_t io_expander = NULL;
     CharLcdDisplay* display_;
     Esp32Camera* camera_;
 
@@ -29,6 +33,38 @@ private:
             .clk_source = I2C_CLK_SRC_DEFAULT,
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+    }
+
+    void InitializeTca9555(void)
+    {
+        esp_err_t ret = esp_io_expander_new_i2c_tca95xx_16bit(i2c_bus_, I2C_ADDRESS, &io_expander);
+        if (ret != ESP_OK)
+            ESP_LOGE(TAG, "TCA9555 create returned error");
+
+        ret = esp_io_expander_set_dir(io_expander,
+                                       IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1 |
+                                       IO_EXPANDER_PIN_NUM_8 | IO_EXPANDER_PIN_NUM_5 |
+                                       IO_EXPANDER_PIN_NUM_6,
+                                       IO_EXPANDER_OUTPUT);
+        ESP_ERROR_CHECK(ret);
+
+        // Reset LCD and TouchPad
+        ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 1);
+        ESP_ERROR_CHECK(ret);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 0);
+        ESP_ERROR_CHECK(ret);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 1);
+        ESP_ERROR_CHECK(ret);
+
+        // Enable amplifier and camera
+        ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_8, 1);  // speaker amp enable
+        ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_5, false); // camera reset low
+        vTaskDelay(pdMS_TO_TICKS(5));
+        ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_6, true);
+        vTaskDelay(pdMS_TO_TICKS(5));
+        ESP_ERROR_CHECK(ret);
     }
 
     void InitializeButtons() {
@@ -79,12 +115,15 @@ public:
     CustomBoard() :
         boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
+        InitializeTca9555();
         InitializeButtons();
 
         // Character LCD at 0x27, 20x4
         display_ = new CharLcdDisplay(i2c_bus_, 0x27, 20, 4);
 
         InitializeCamera();
+
+        GetBacklight()->RestoreBrightness();
     }
 
     virtual Led* GetLed() override {
@@ -93,9 +132,18 @@ public:
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-        static BoxAudioCodec audio_codec(i2c_bus_, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-            AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR, AUDIO_CODEC_ES7210_ADDR, AUDIO_INPUT_REFERENCE);
+        static BoxAudioCodec audio_codec(i2c_bus_,
+                                         AUDIO_INPUT_SAMPLE_RATE,
+                                         AUDIO_OUTPUT_SAMPLE_RATE,
+                                         AUDIO_I2S_GPIO_MCLK,
+                                         AUDIO_I2S_GPIO_BCLK,
+                                         AUDIO_I2S_GPIO_WS,
+                                         AUDIO_I2S_GPIO_DOUT,
+                                         AUDIO_I2S_GPIO_DIN,
+                                         AUDIO_CODEC_PA_PIN,
+                                         AUDIO_CODEC_ES8311_ADDR,
+                                         AUDIO_CODEC_ES7210_ADDR,
+                                         AUDIO_INPUT_REFERENCE);
         return &audio_codec;
     }
 
@@ -104,7 +152,8 @@ public:
     }
 
     virtual Backlight* GetBacklight() override {
-        return nullptr; // no backlight control
+        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, BACKLIGHT_INVERT);
+        return &backlight;
     }
 
     virtual Camera* GetCamera() override {
