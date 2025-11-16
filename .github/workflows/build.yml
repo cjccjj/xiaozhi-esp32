@@ -36,7 +36,7 @@ jobs:
       - id: select
         name: Hard‑coded variant selection
         run: |
-          VARIANTS='[{"board": "waveshare-s3-audio-board", "name": "waveshare-s3-audio-board"}]'
+          VARIANTS='[{"board": "waveshare-s3-audio-board", "name": "waveshare-s3-audio-board"},{"board": "waveshare-s3-audio-board-lcd-2004", "name": "waveshare-s3-audio-board-lcd-2004"}]'
           echo "variants=$VARIANTS" >> $GITHUB_OUTPUT
   build:
     name: Build ${{ matrix.name }}
