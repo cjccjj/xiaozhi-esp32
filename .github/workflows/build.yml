@@ -1,13 +1,14 @@
 name: Build Boards
 
 on:
-  push:
-    branches:
-      - main
-      - ci/* # for ci test
-  pull_request:
-    branches:
-      - main
+#  push:
+#    branches:
+#      - main
+#      - ci/* # for ci test
+#  pull_request:
+#    branches:
+#      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
