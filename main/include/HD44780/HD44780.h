@@ -79,23 +79,23 @@ struct lcd_dims_t
 	}
 };
 
-lcd_dims_t operator+(lcd_dims_t l, const lcd_dims_t &r)
+inline lcd_dims_t operator+(lcd_dims_t l, const lcd_dims_t &r)
 {
 	return l += r;
 }
-lcd_dims_t operator-(lcd_dims_t l, const lcd_dims_t &r)
+inline lcd_dims_t operator-(lcd_dims_t l, const lcd_dims_t &r)
 {
 	return l -= r;
 }
-lcd_dims_t operator*(lcd_dims_t l, const lcd_dims_t &r)
+inline lcd_dims_t operator*(lcd_dims_t l, const lcd_dims_t &r)
 {
 	return l *= r;
 }
-lcd_dims_t operator/(lcd_dims_t l, const lcd_dims_t &r)
+inline lcd_dims_t operator/(lcd_dims_t l, const lcd_dims_t &r)
 {
 	return l /= r;
 }
-lcd_dims_t operator%(lcd_dims_t l, const lcd_dims_t &r)
+inline lcd_dims_t operator%(lcd_dims_t l, const lcd_dims_t &r)
 {
 	return l %= r;
 }
