@@ -12,7 +12,9 @@
 class CharLcdDisplay : public Display {
 public:
     CharLcdDisplay(i2c_master_bus_handle_t bus, uint8_t i2c_addr = 0x27, int cols = 20, int rows = 4)
-        : bus_(bus), comm_(bus_, i2c_addr, 400000), disp_(&comm_, {rows, cols}, LCD_2LINE) {
+        : bus_(bus),
+          comm_(bus_, i2c_addr, 400000),
+          disp_(&comm_, {static_cast<uint8_t>(rows), static_cast<uint8_t>(cols)}, LCD_2LINE) {
         width_ = cols;
         height_ = rows;
 
