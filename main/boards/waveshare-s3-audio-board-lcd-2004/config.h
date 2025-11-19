@@ -38,6 +38,11 @@
 
 #define DISPLAY_SPI_SCLK_HZ         (20 * 1000 * 1000)
 
+//char lcd display
+#define LCD_I2C_SDA   GPIO_NUM_9
+#define LCD_I2C_SCL   GPIO_NUM_8
+
+
 /* Camera pins */
 #define CAMERA_PIN_PWDN     GPIO_NUM_NC
 #define CAMERA_PIN_RESET    GPIO_NUM_NC

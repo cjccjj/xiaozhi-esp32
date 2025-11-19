@@ -21,6 +21,7 @@ class CustomBoard : public WifiBoard {
 private:
     Button boot_button_;
     i2c_master_bus_handle_t i2c_bus_;
+    i2c_master_bus_handle_t lcd_i2c_bus_; //for lcd char 2004
     esp_io_expander_handle_t io_expander = NULL;
     CharLcdDisplay* display_;
     Esp32Camera* camera_;
@@ -34,6 +35,18 @@ private:
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
     }
+
+    // Initialize I2C for character LCD
+    void InitializeLcdI2c() {
+        i2c_master_bus_config_t lcd_i2c_bus_cfg = {
+            .i2c_port = I2C_NUM_1,          // <-- second controller
+            .sda_io_num = LCD_I2C_SDA,       // <-- your LCD SDA
+            .scl_io_num = LCD_I2C_SCL,       // <-- your LCD SCL
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+        };
+    ESP_ERROR_CHECK(i2c_new_master_bus(&lcd_i2c_bus_cfg, &lcd_i2c_bus_));
+    }
+
 
     void InitializeTca9555(void)
     {
@@ -119,7 +132,7 @@ public:
         InitializeButtons();
 
         // Character LCD at 0x27, 20x4
-        display_ = new CharLcdDisplay(i2c_bus_, 0x27, 20, 4);
+        display_ = new CharLcdDisplay(lcd_i2c_bus_, 0x27, 20, 4);
 
         InitializeCamera();
 
