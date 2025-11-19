@@ -128,13 +128,14 @@ public:
     CustomBoard() :
         boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
+        InitializeLcdI2c();
         InitializeTca9555();
         InitializeButtons();
 
         // Character LCD at 0x27, 20x4
         display_ = new CharLcdDisplay(lcd_i2c_bus_, 0x27, 20, 4);
 
-        InitializeCamera();
+        //InitializeCamera();
 
         GetBacklight()->RestoreBrightness();
     }
