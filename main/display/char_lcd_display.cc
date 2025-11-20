@@ -42,21 +42,23 @@ static std::string lcd_filter_text(const char* content) {
             char ch;
             if (b0 == '\n' || b0 == '\r' || b0 == '\t') {
                 ch = ' ';
-            } else if (b0 < 32 || b0> 126) {
+            } else if (b0 < 32 || b0 > 126) {
                 ch = ' ';
             } else {
                 switch (b0) {
-                    case '{': // A00 uses Katakana/Symbol here
+                    case '[':
+                    case '{':
                         ch = '(';
                         break;
-                    case '}': // A00 uses Katakana/Symbol here
+                    case ']':
+                    case '}':
                         ch = ')';
                         break;
-                    case '|': // A00 uses a custom arrow symbol (0x7C)
+                    case '|':
                         ch = ' ';
                         break;
-                    case '~': // A00 uses a custom block symbol (0x7E)
-                        ch = '^'; 
+                    case '~':
+                        ch = '^';
                         break;
                     default:
                         ch = static_cast<char>(b0);
@@ -71,20 +73,17 @@ static std::string lcd_filter_text(const char* content) {
             if ((b1 & 0xC0) == 0x80 && (b2 & 0xC0) == 0x80) {
                 uint32_t cp = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
                 char ch = ' ';
-                if (cp == 0x2018 || cp == 0x2019) ch = '\''; // Smart Single Quotes
-                else if (cp == 0x201C || cp == 0x201D) ch = '"'; // Smart Double Quotes
-                else if (cp == 0xFF08) ch = '('; // Fullwidth Parenthesis (
-                else if (cp == 0xFF09) ch = ')'; // Fullwidth Parenthesis )
-                else if (cp == 0x20AC) ch = 'E'; // Euro (€)
-                else if (cp == 0x2013 || cp == 0x2014) ch = '-'; // En/Em Dash (–, —)
-                else if (cp == 0x2026) ch = '.'; // Ellipsis (...)
-                else if (cp == 0xA3) ch = 'L'; // Pound (£)
-                else if (cp == 0xA5) ch = 'Y'; // Yen (¥)
-                else if (cp == 0xAE || cp == 0x2122) ch = 'R'; // Registered/Trademark (®, ™)
-                
-                // Add Degree Symbol conversion
-                else if (cp == 0xB0) ch = '*'; // Degree symbol (°)
-                
+                if (cp == 0x2018 || cp == 0x2019) ch = '\'';
+                else if (cp == 0x201C || cp == 0x201D) ch = '"';
+                else if (cp == 0xFF08) ch = '(';
+                else if (cp == 0xFF09) ch = ')';
+                else if (cp == 0x20AC) ch = 'E';
+                else if (cp == 0x2013 || cp == 0x2014) ch = '-';
+                else if (cp == 0x2026) ch = '.';
+                else if (cp == 0x00A3) ch = 'L';
+                else if (cp == 0x00A5) ch = 'Y';
+                else if (cp == 0x00AE || cp == 0x2122) ch = 'R';
+                else if (cp == 0x00B0) ch = '*';
                 out.push_back(ch);
                 i += 3;
             } else {
@@ -94,15 +93,13 @@ static std::string lcd_filter_text(const char* content) {
         } else if (b0 >= 0xC2 && b0 <= 0xDF && i + 1 < n) {
             unsigned char b1 = s[i + 1];
             if ((b1 & 0xC0) == 0x80) {
-                // Two-byte UTF-8 sequences are usually unsupported diacritics
-                out.push_back(' '); 
+                out.push_back(' ');
                 i += 2;
             } else {
                 out.push_back(' ');
                 i++;
             }
         } else if (b0 >= 0xF0 && b0 <= 0xF4 && i + 3 < n) {
-            // Four-byte UTF-8 sequences are typically emojis or rare characters
             out.push_back(' ');
             i += 4;
         } else {
