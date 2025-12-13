@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <vector>
 #include <esp_log.h>
 #include "application.h"
 #include "freertos/FreeRTOS.h"
@@ -200,10 +201,12 @@ void CharLcdDisplay::SendShow(const char* text, int row, int col) {
     DisplayMsg msg{};
     msg.row = row;
     msg.col = col;
-    size_t n = std::min<size_t>(sizeof(msg.text) - 1, std::strlen(text));
-    for (size_t i = 0; i < n; ++i) {
-        msg.text[i] = hd44780_sanitize_char(text[i]);
+    std::string filtered = lcd_filter_text(text);
+    for (size_t k = 0; k < filtered.size(); ++k) {
+        filtered[k] = hd44780_sanitize_char(filtered[k]);
     }
+    size_t n = std::min<size_t>(sizeof(msg.text) - 1, filtered.size());
+    std::memcpy(msg.text, filtered.data(), n);
     msg.text[n] = '\0';
     xQueueSend(display_queue_, &msg, 0);
 }
@@ -231,22 +234,61 @@ void CharLcdDisplay::DisplayTask(void* arg) {
                 self->cursor_row_ = msg.row;
                 self->cursor_col_ = msg.col;
             }
-            const char* text = msg.text;
-            int count = 0;
-            int max_chars = self->cols_ * self->rows_;
-            while (*text && count < max_chars) {
-                if (self->cursor_row_ >= self->rows_) break;
-                if (self->cursor_col_ >= self->cols_) {
-                    self->cursor_col_ = 0;
-                    self->cursor_row_++;
-                    if (self->cursor_row_ >= self->rows_) break;
+            if (self->cursor_row_ == 0 && self->cursor_col_ == 0) {
+                std::vector<std::string> lines;
+                size_t total_len = std::strlen(msg.text);
+                for (size_t off = 0; off < total_len && lines.size() < 8; off += self->cols_) {
+                    size_t chunk = std::min<size_t>(self->cols_, total_len - off);
+                    lines.emplace_back(std::string(msg.text + off, chunk));
                 }
-                lcd_set_cursor((uint8_t)self->cursor_col_, (uint8_t)self->cursor_row_);
-                char s[2] = { *text, 0 };
-                lcd_write_string(s);
-                self->cursor_col_++;
-                text++;
-                count++;
+                size_t line_count = lines.size();
+                size_t page1_lines = std::min<size_t>(self->rows_, line_count);
+                for (size_t r = 0; r < page1_lines; ++r) {
+                    self->cursor_row_ = (int)r;
+                    self->cursor_col_ = 0;
+                    for (size_t i = 0; i < lines[r].size(); ++i) {
+                        lcd_set_cursor((uint8_t)self->cursor_col_, (uint8_t)self->cursor_row_);
+                        char s[2] = { lines[r][i], 0 };
+                        lcd_write_string(s);
+                        self->cursor_col_++;
+                    }
+                }
+                if (line_count > self->rows_) {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    lcd_clear();
+                    self->cursor_row_ = 0;
+                    self->cursor_col_ = 0;
+                    size_t start2 = line_count > self->rows_ ? (line_count - self->rows_) : 0;
+                    for (size_t r = 0; r < self->rows_; ++r) {
+                        const std::string& ln = lines[start2 + r];
+                        self->cursor_row_ = (int)r;
+                        self->cursor_col_ = 0;
+                        for (size_t i = 0; i < ln.size(); ++i) {
+                            lcd_set_cursor((uint8_t)self->cursor_col_, (uint8_t)self->cursor_row_);
+                            char s[2] = { ln[i], 0 };
+                            lcd_write_string(s);
+                            self->cursor_col_++;
+                        }
+                    }
+                }
+            } else {
+                const char* text = msg.text;
+                int count = 0;
+                int max_chars = self->cols_ * self->rows_;
+                while (*text && count < max_chars) {
+                    if (self->cursor_row_ >= self->rows_) break;
+                    if (self->cursor_col_ >= self->cols_) {
+                        self->cursor_col_ = 0;
+                        self->cursor_row_++;
+                        if (self->cursor_row_ >= self->rows_) break;
+                    }
+                    lcd_set_cursor((uint8_t)self->cursor_col_, (uint8_t)self->cursor_row_);
+                    char s[2] = { *text, 0 };
+                    lcd_write_string(s);
+                    self->cursor_col_++;
+                    text++;
+                    count++;
+                }
             }
         }
     }
