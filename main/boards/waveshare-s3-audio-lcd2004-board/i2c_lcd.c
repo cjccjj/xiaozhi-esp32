@@ -138,28 +138,61 @@ void lcd_init(void) {
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
-    static const uint8_t frame1[8] = {0x00, 0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E}; //1 not working
-    static const uint8_t frame2[8] = {0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E, 0x00}; //2
-    static const uint8_t frame3[8] = {0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E, 0x00, 0x00}; //3
-    static const uint8_t frame4[8] = {0x0E, 0x11, 0x11, 0x11, 0x0E, 0x00, 0x00, 0x00}; //4
-    static const uint8_t frame5[8] = {0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F}; //5
-    static const uint8_t frame6[8] = {0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F}; //6
-    static const uint8_t frame7[8] = {0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F}; //7
-    static const uint8_t frame8[8] = {0x00, 0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E}; //8 same as 1 
-
-    const uint8_t* frames[8] = {frame1, frame2, frame3, frame4, frame5, frame6, frame7, frame8};
+    static const uint8_t slots1[8][8] = {
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00001110, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00000000, 0b00001110, 0b00010001, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00001110, 0b00010001, 0b00010001, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00001110, 0b00010001, 0b00010001, 0b00010001, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00010001, 0b00010001, 0b00010001, 0b00001110, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00010001, 0b00010001, 0b00001110, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00010001, 0b00001110, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00001110, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 }
+    };
+    static const uint8_t slots2[8][8] = {
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 },
+    { 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000, 0b00000000 }
+    };
+    // use first 8 slots only can use up to 16
     for (uint8_t slot = 0; slot < 8; ++slot) {
-        uint8_t addr = (uint8_t)(0x40 | (slot << 3));
+
+        // Your LCD supports CGRAM slots 0–15
+        uint8_t addr = 0x40 | (slot << 3);      // 8 bytes per character
         ESP_ERROR_CHECK(i2c_send_byte_on_4bits(addr, LCD_RS_CMD));
         vTaskDelay(pdMS_TO_TICKS(5));
+
+        // Pick the right table and column (character index)
+        const uint8_t (*src)[8];
+        uint8_t col;
+
+        if (slot < 8) {
+            src = slots1;        // slots 0..7
+            col = slot;
+        } else {
+            src = slots2;        // slots 8..15
+            col = slot - 8;
+        }
+
+        // Write the character row-by-row
         for (uint8_t row = 0; row < 8; ++row) {
-            ESP_ERROR_CHECK(i2c_send_byte_on_4bits(frames[slot][row], LCD_RS_DATA));
+
+            // TRANSPOSED READ HERE
+            uint8_t pattern = src[row][col];
+
+            ESP_ERROR_CHECK(i2c_send_byte_on_4bits(pattern, LCD_RS_DATA));
             vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
+
+    // Return to DDRAM
     ESP_ERROR_CHECK(i2c_send_byte_on_4bits(0x80, LCD_RS_CMD));
     vTaskDelay(pdMS_TO_TICKS(5));
-
+    
 }
 
 // Set cursor position on the LCD
