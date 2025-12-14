@@ -224,7 +224,7 @@ void CharLcdDisplay::DisplayTask(void* arg) {
             if (std::strcmp(msg.text, "listening") == 0) {
                 int r = (msg.row >= 0 && msg.row < self->rows_) ? msg.row : self->cursor_row_;
                 int c = (msg.col >= 0 && msg.col < self->cols_) ? msg.col : self->cursor_col_;
-                const uint8_t seq[6] = {8,1,2,3,2,1};
+                const uint8_t seq[6] = {1,2,3,4,3,2}; //0 somehow not working
                 for (int l = 0; l < 20; ++l) { //max 20 loops, 40 sec.
                     for (int f = 0; f < 6; ++f) {
                         lcd_set_cursor((uint8_t)c, (uint8_t)r);
