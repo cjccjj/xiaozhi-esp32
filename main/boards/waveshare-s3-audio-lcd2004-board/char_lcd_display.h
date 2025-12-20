@@ -39,12 +39,21 @@ protected:
     virtual void Unlock() override {}
 
 private:
+    enum DisplayCmd {
+        LCD_CMD_CLEAR,
+        LCD_CMD_SET_CURSOR,
+        LCD_CMD_SHOW,
+        LCD_CMD_ANIMATION
+    };
     struct DisplayMsg {
-        char text[128];
+        DisplayCmd cmd; // Explicitly state what to do
         int row;
         int col;
+        char text[256];
     };
     static void DisplayTask(void* arg);
+    void Lcd_Animation(const DisplayMsg& msg);
+    void Lcd_Show(const DisplayMsg& msg);
     void SendClear();
     void SendSetCursor(int row, int col);
     void SendShow(const char* text, int row, int col);
