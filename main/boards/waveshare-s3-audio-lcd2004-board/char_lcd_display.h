@@ -58,6 +58,7 @@ private:
     void SendSetCursor(int row, int col);
     void SendShow(const char* text, int row, int col);
     void SendAnimation(const char* name, int row, int col);
+    void NormalizeCursor();
     i2c_port_num_t i2c_port_;
     gpio_num_t sda_gpio_;
     gpio_num_t scl_gpio_;

@@ -19,72 +19,109 @@ static const char *TAG = "CharLcdDisplay";
 
 static std::string lcd_filter_all(const char* content) {
     if (content == nullptr) return std::string();
+
     const unsigned char* s = reinterpret_cast<const unsigned char*>(content);
     size_t n = std::strlen(content);
     std::string out;
-    out.reserve(n);
+    out.reserve(n + n / 4); 
+
     size_t i = 0;
     while (i < n) {
         unsigned char b0 = s[i];
+
+        // --- ASCII Handling ---
         if (b0 < 0x80) {
             char ch = static_cast<char>(b0);
             if (b0 == '\n' || b0 == '\r' || b0 == '\t') ch = ' ';
-            if (b0 > 127) ch = ' ';
             if (ch == '\\') ch = '|';
             if (ch == '~') ch = ' ';
+            
             out.push_back(ch);
             i++;
-        } else if (b0 >= 0xE0 && b0 <= 0xEF && i + 2 < n) {
+        } 
+        // --- 3-Byte UTF-8 (Chinese & Special Punctuation) ---
+        else if (b0 >= 0xE0 && b0 <= 0xEF && i + 2 < n) {
             unsigned char b1 = s[i + 1];
             unsigned char b2 = s[i + 2];
+
             if ((b1 & 0xC0) == 0x80 && (b2 & 0xC0) == 0x80) {
                 uint32_t cp = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
 
-                // Check if it's a Chinese character (CJK Unified Ideographs)
+                // 1. Chinese Characters (Pinyin)
                 if (cp >= 0x4E00 && cp <= 0x9FA5) {
-                    // Extract the 3-byte UTF-8 sequence
-                    std::string chinese_char(&content[i], 3);
-                    
-                    // Convert to pinyin and append
+                    std::string chinese_char(reinterpret_cast<const char*>(&s[i]), 3);
                     std::string pinyin = ZhToPY::instance().zhToPY(chinese_char);
+                    
                     if (!pinyin.empty()) {
+                        // LOGIC CHANGE: Only add space BEFORE the pinyin if needed.
+                        // This prevents a trailing space from messing up the next punctuation.
+                        if (!out.empty() && out.back() != ' ') {
+                            out.push_back(' ');
+                        }
                         out.append(pinyin);
                     } else {
-                        out.push_back(' ');  // Fallback for unmapped chars
+                        out.push_back(' '); 
                     }
                 } 
+                // 2. Chinese Punctuation
+                else {
+                    char ch = 0;
+                    if (cp == 0xFF0C) ch = ',';       // ，
+                    else if (cp == 0x3002) ch = '.';  // 。
+                    else if (cp == 0xFF1F) ch = '?';  // ？
+                    else if (cp == 0xFF01) ch = '!';  // ！
+                    else if (cp == 0xFF1B) ch = ';';  // ；
+                    else if (cp == 0xFF1A) ch = ':';  // ：
+                    else if (cp == 0x2018 || cp == 0x2019) ch = '\'';
+                    else if (cp == 0x201C || cp == 0x201D) ch = '"';
+                    else if (cp == 0x2013 || cp == 0x2014) ch = '-';
+                    else if (cp == 0x2026) ch = '_';
 
-                char ch = ' ';
-                if (cp == 0x2018 || cp == 0x2019) ch = '\'';
-                else if (cp == 0x201C || cp == 0x201D) ch = '"';
-                else if (cp == 0x2013 || cp == 0x2014) ch = '-';
-                else if (cp == 0x2026) ch = '_';
-                if (ch == '\\') ch = '|';
-                if (ch == '~') ch = ' ';
-                out.push_back(ch);
+                    if (ch != 0) {
+                        if (ch == '\\') ch = '|';
+                        if (ch == '~') ch = ' ';
+                        out.push_back(ch);
+                    } else {
+                        // Unknown 3-byte char
+                        out.push_back(' ');
+                    }
+                }
                 i += 3;
             } else {
                 out.push_back(' ');
                 i++;
             }
-        } else if (b0 >= 0xC2 && b0 <= 0xDF && i + 1 < n) {
-            unsigned char b1 = s[i + 1];
-            if ((b1 & 0xC0) == 0x80) {
-                out.push_back(' ');
-                i += 2;
-            } else {
-                out.push_back(' ');
-                i++;
-            }
-        } else if (b0 >= 0xF0 && b0 <= 0xF4 && i + 3 < n) {
+        } 
+        // --- 2-Byte UTF-8 ---
+        else if (b0 >= 0xC2 && b0 <= 0xDF && i + 1 < n) {
+            out.push_back(' ');
+            i += 2;
+        } 
+        // --- 4-Byte UTF-8 ---
+        else if (b0 >= 0xF0 && b0 <= 0xF4 && i + 3 < n) {
             out.push_back(' ');
             i += 4;
-        } else {
+        } 
+        else {
             out.push_back(' ');
             i++;
         }
     }
     return out;
+}
+
+void CharLcdDisplay::NormalizeCursor() {
+    // 1. If column is 20, move to the start of the next row
+    if (cursor_col_ >= cols_) {
+        cursor_col_ = 0;
+        cursor_row_++;
+    }
+
+    // 2. If row is 4, wrap back to the very top (Row 0)
+    if (cursor_row_ >= rows_) {
+        cursor_row_ = 0;
+        cursor_col_ = 0;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -109,7 +146,7 @@ CharLcdDisplay::CharLcdDisplay(i2c_port_num_t i2c_port,
     vTaskDelay(pdMS_TO_TICKS(2));
 
     ESP_LOGI(TAG, "LCD initialized successfully");
-    
+
     display_queue_ = xQueueCreate(10, sizeof(DisplayMsg));
     xTaskCreate(&CharLcdDisplay::DisplayTask, "charlcd_display", 3072, this, 5, &display_task_handle_);
 }
@@ -138,7 +175,10 @@ void CharLcdDisplay::SetChatMessage(const char * /*role*/, const char *content)
 void CharLcdDisplay::SetStatus(const char* status)
 {
     if (status && std::strcmp(status, Lang::Strings::LISTENING) == 0) {
+        ESP_LOGI(TAG, "row%d,col%d", cursor_row_, cursor_col_);
+        
         SendAnimation("listening", -1, -1);
+        
         return;
     }
     SendShow(status, 0, 0);
@@ -279,109 +319,93 @@ void CharLcdDisplay::Lcd_Show(const DisplayMsg& msg) {
         cursor_col_ = msg.col;
     }
 
-    // --- LOGIC A: Multi-line Paging (Starts at 0,0) ---
-    if (cursor_row_ == 0 && cursor_col_ == 0) {
-        std::vector<std::string> lines;
-        size_t total_len = std::strlen(msg.text);
-        size_t current_pos = 0;
+    // Unified line preparation
+    std::vector<std::string> lines;
+    const char* text = msg.text;
+    
+    // Determine if this is a multi-page scenario (starts at 0,0)
+    bool is_multi_page = (cursor_row_ == 0 && cursor_col_ == 0);
+    
+    // Calculate constraints
+    int max_total_lines = is_multi_page ? 8 : (rows_ - cursor_row_);
+    int first_line_max = cols_ - cursor_col_;
+    
+    // Prepare all lines at once
+    int lines_prepared = 0;
+    bool is_first_line = true;
+    
+    while (*text && lines_prepared < max_total_lines) {
+        std::string line = "";
+        int line_max = is_first_line ? first_line_max : cols_;
+        
+        // Skip leading space on new lines (except first line)
+        if (!is_first_line && *text == ' ') {
+            text++;
+            if (!*text) break;
+        }
+        
+        // Build the line
+        int chars_in_line = 0;
+        while (*text && chars_in_line < line_max) {
+            line += *text;
+            text++;
+            chars_in_line++;
+        }
+        
+        if (!line.empty()) {
+            lines.push_back(line);
+            lines_prepared++;
+        }
+        
+        is_first_line = false;
+    }
 
-        // Split text into lines, omitting leading spaces on new lines (Max 8 lines as per your original)
-        while (current_pos < total_len && lines.size() < 8) {
-            size_t start_of_line = current_pos;
+    size_t line_count = lines.size();
+    
+    // Print first page
+    size_t page1_lines = std::min<size_t>((size_t)rows_, line_count);
+    
+    int start_row = cursor_row_;
+    int start_col = cursor_col_;
+    
+    for (size_t r = 0; r < page1_lines; ++r) {
+        // Check for new message between lines
+        if (uxQueueMessagesWaiting(display_queue_) > 0) return;
 
-            // For lines after the first one, if it starts with a space, skip it.
-            if (lines.size() > 0 && msg.text[start_of_line] == ' ') {
-                start_of_line++;
-            }
+        cursor_row_ = start_row + (int)r;
+        cursor_col_ = (r == 0) ? start_col : 0;
+        
+        lcd_set_cursor((uint8_t)cursor_col_, (uint8_t)cursor_row_);
+        lcd_write_string(lines[r].c_str());
+        cursor_col_ += lines[r].size();
+        NormalizeCursor();
+    }
 
-            size_t chars_remaining = total_len - start_of_line;
-            size_t chunk_len = std::min<size_t>((size_t)cols_, chars_remaining);
-
-            if (chunk_len > 0) {
-                lines.emplace_back(std::string(msg.text + start_of_line, chunk_len));
-            }
-
-            // Advance the position by the number of characters processed for this line.
-            current_pos = start_of_line + chunk_len;
+    // Handle second page only for multi-page mode (starting at 0,0)
+    if (is_multi_page && line_count > (size_t)rows_) {
+        // Wait 500ms total, checking every 50ms for responsiveness
+        for (int i = 0; i < 10; ++i) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            if (uxQueueMessagesWaiting(display_queue_) > 0) return;
         }
 
-        size_t line_count = lines.size();
-        size_t page1_lines = std::min<size_t>((size_t)rows_, line_count);
+        lcd_clear();
+        cursor_row_ = 0;
+        cursor_col_ = 0;
 
-        // Print Page 1
-        for (size_t r = 0; r < page1_lines; ++r) {
-            // CHECK: Quit between lines if a new message arrives
+        size_t start2 = line_count - (size_t)rows_;
+        
+        // Print second page
+        for (size_t r = 0; r < (size_t)rows_ && (start2 + r) < line_count; ++r) {
+            // Check for new message between lines
             if (uxQueueMessagesWaiting(display_queue_) > 0) return;
 
-            cursor_row_ = (int)r;
-            cursor_col_ = 0;
-            lcd_set_cursor(0, (uint8_t)cursor_row_);
-            lcd_write_string(lines[r].c_str());
-            cursor_col_ = lines[r].size();
-        }
-
-        // Handle Page 2 transition if text is longer than the screen
-        if (line_count > (size_t)rows_) {
-            // Wait 500ms total, checking every 50ms for responsiveness
-            for (int i = 0; i < 10; ++i) {
-                vTaskDelay(pdMS_TO_TICKS(50));
-                if (uxQueueMessagesWaiting(display_queue_) > 0) return;
-            }
-
-            lcd_clear();
-            cursor_row_ = 0;
-            cursor_col_ = 0;
-
-            size_t start2 = (line_count > (size_t)rows_) ? (line_count - (size_t)rows_) : 0;
-            //drop any char after page2
-            for (size_t r = 0; r < (size_t)rows_ && (start2 + r) < line_count; ++r) {
-                // CHECK: Quit between lines
-                if (uxQueueMessagesWaiting(display_queue_) > 0) return;
-
-                cursor_row_ = (int)r;
-                cursor_col_ = 0;
-                lcd_set_cursor(0, (uint8_t)cursor_row_);
-                lcd_write_string(lines[start2 + r].c_str());
-                cursor_col_ = lines[start2 + r].size();
-            }
-        }
-    }
-    // --- LOGIC B: Direct Placement (Starts elsewhere) ---
-    else {
-        const char* text = msg.text;
-        int count = 0;
-        //drop char when page end.
-        int max_chars = (rows_ - cursor_row_) * cols_ - cursor_col_;
-        bool is_first_char_of_message = true;
-
-        while (*text && count < max_chars) {
-            if (cursor_row_ >= rows_) break;
-
-            // NEW: If we are at the start of a new line (due to wrapping) and the character is a space, skip it.
-            if (!is_first_char_of_message && cursor_col_ == 0 && *text == ' ') {
-                text++; // Skip the leading space
-                if (!*text) continue; // If that space was the last character, exit.
-            }
-
-            // 1. Draw the character
-            lcd_set_cursor((uint8_t)cursor_col_, (uint8_t)cursor_row_);
-            char s[2] = { *text, 0 };
-            lcd_write_string(s);
-            is_first_char_of_message = false;
-
-            // 2. Advance positions
-            cursor_col_++;
-            text++;
-            count++;
-
-            // 3. Handle line wrap AND Check for new messages
-            if (cursor_col_ >= cols_) {
-                cursor_col_ = 0;
-                cursor_row_++;
-
-                // AFTER a line is finished, we check if we should quit for a new job
-                if (uxQueueMessagesWaiting(display_queue_) > 0) return;
-            }
+        cursor_row_ = (int)r;
+        cursor_col_ = 0;
+        lcd_set_cursor(0, (uint8_t)cursor_row_);
+        lcd_write_string(lines[start2 + r].c_str());
+        cursor_col_ = lines[start2 + r].size();
+        NormalizeCursor();
         }
     }
 }
