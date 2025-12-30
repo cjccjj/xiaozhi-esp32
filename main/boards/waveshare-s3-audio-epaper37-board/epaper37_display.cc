@@ -15,33 +15,17 @@
 
 void Epaper37Display::lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p) {
     Epaper37Display *driver = (Epaper37Display *)lv_display_get_user_data(disp);
-    uint16_t *rgb_buffer = (uint16_t *)color_p;
+    uint16_t         *buffer = (uint16_t *) color_p;
 
     // According to STM32 example main.c:
     // while(1) { EPD_PartInit(); ... EPD_Display(); EPD_Update(); delay; }
     driver->EPD_PartInit();
     
-    // Convert RGB565 to 1-bit B/W using luminance threshold
-    for (int y = 0; y < driver->Height; y++) {
-        for (int x = 0; x < driver->Width; x++) {
-            uint16_t color = rgb_buffer[y * driver->Width + x];
-            
-            // Extract RGB components from RGB565
-            uint8_t r = (color >> 11) & 0x1F; // 5 bits
-            uint8_t g = (color >> 5) & 0x3F;  // 6 bits
-            uint8_t b = color & 0x1F;         // 5 bits
-            
-            // Convert to 0-255 range
-            uint16_t r8 = (r * 255) / 31;
-            uint16_t g8 = (g * 255) / 63;
-            uint16_t b8 = (b * 255) / 31;
-            
-            // Calculate luminance: Y = 0.299R + 0.587G + 0.114B
-            uint16_t luminance = (r8 * 76 + g8 * 150 + b8 * 29) >> 8;
-            
-            // Use 128 as threshold for B/W
-            uint8_t bw_color = (luminance > 128) ? DRIVER_COLOR_WHITE : DRIVER_COLOR_BLACK;
-            driver->EPD_DrawColorPixel(x, y, bw_color);
+    for (int y = area->y1; y <= area->y2; y++) {
+        for (int x = area->x1; x <= area->x2; x++) {
+            uint8_t color = (*buffer < 0x7fff) ? DRIVER_COLOR_BLACK : DRIVER_COLOR_WHITE;
+            driver->EPD_DrawColorPixel(x, y, color);
+            buffer++;
         }
     }
 
