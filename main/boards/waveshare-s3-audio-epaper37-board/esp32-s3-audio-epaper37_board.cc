@@ -23,9 +23,6 @@
 
 #define TAG "waveshare_s3_audio_epaper37_board"
 
-// #define LCD_OPCODE_WRITE_CMD        (0x02ULL)
-// #define LCD_OPCODE_READ_CMD         (0x0BULL)
-// #define LCD_OPCODE_WRITE_COLOR      (0x32ULL)
 
 class CustomBoard : public WifiBoard {
 private:
@@ -54,32 +51,12 @@ private:
 
         ret = esp_io_expander_set_dir(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1 | IO_EXPANDER_PIN_NUM_8|IO_EXPANDER_PIN_NUM_5|IO_EXPANDER_PIN_NUM_6, IO_EXPANDER_OUTPUT);                 // 设置引脚 EXIO0 和 EXIO1 模式为输出
         ESP_ERROR_CHECK(ret);
-        //ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 1);                                // 复位 LCD 与 TouchPad
-        //ESP_ERROR_CHECK(ret);
-        //vTaskDelay(pdMS_TO_TICKS(10));
-        //ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 0);                                // 复位 LCD 与 TouchPad
-        //ESP_ERROR_CHECK(ret);
-        //vTaskDelay(pdMS_TO_TICKS(10));
-        //ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_0 | IO_EXPANDER_PIN_NUM_1, 1);                                // 复位 LCD 与 TouchPad
-        //ESP_ERROR_CHECK(ret);
         ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_8, 1);                                                         // 启用喇叭功放
-        //ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_5, false);                                                     // 复位摄像头
         vTaskDelay(pdMS_TO_TICKS(5));
         ret = esp_io_expander_set_level(io_expander, IO_EXPANDER_PIN_NUM_6, true); 
         vTaskDelay(pdMS_TO_TICKS(5));
         ESP_ERROR_CHECK(ret);
     }
-
-    // void InitializeSpi() {
-    //     spi_bus_config_t buscfg = {};
-    //     buscfg.mosi_io_num = DISPLAY_MOSI_PIN;
-    //     buscfg.miso_io_num = GPIO_NUM_NC;
-    //     buscfg.sclk_io_num = DISPLAY_SCLK_PIN;
-    //     buscfg.quadwp_io_num = GPIO_NUM_NC;
-    //     buscfg.quadhd_io_num = GPIO_NUM_NC;
-    //     buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
-    //     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
-    // }
 
     void InitializeLcdDisplay() {
         epaper37_spi_t lcd_spi_data = {};
@@ -90,7 +67,7 @@ private:
         lcd_spi_data.mosi             = EPD_MOSI_PIN;
         lcd_spi_data.scl              = EPD_SCK_PIN;
         lcd_spi_data.spi_host         = EPD_SPI_NUM;
-        lcd_spi_data.buffer_len       = 5000;
+        lcd_spi_data.buffer_len       = 25000;
         display_                      = new Epaper37Display(NULL, NULL, EXAMPLE_LCD_WIDTH, EXAMPLE_LCD_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, lcd_spi_data);
     }
 
@@ -105,46 +82,6 @@ private:
         });
     }
 
-    // void InitializeCamera() {
-    //     static esp_cam_ctlr_dvp_pin_config_t dvp_pin_config = {
-    //         .data_width = CAM_CTLR_DATA_WIDTH_8,
-    //         .data_io = {
-    //             [0] = CAMERA_PIN_D0,
-    //             [1] = CAMERA_PIN_D1,
-    //             [2] = CAMERA_PIN_D2,
-    //             [3] = CAMERA_PIN_D3,
-    //             [4] = CAMERA_PIN_D4,
-    //             [5] = CAMERA_PIN_D5,
-    //             [6] = CAMERA_PIN_D6,
-    //             [7] = CAMERA_PIN_D7,
-    //         },
-    //         .vsync_io = CAMERA_PIN_VSYNC,
-    //         .de_io = CAMERA_PIN_HREF,
-    //         .pclk_io = CAMERA_PIN_PCLK,
-    //         .xclk_io = CAMERA_PIN_XCLK,
-    //     };
-
-    //     esp_video_init_sccb_config_t sccb_config = {
-    //         .init_sccb = false,  // 不初始化新的 SCCB，使用现有的 I2C 总线
-    //         .i2c_handle = i2c_bus_,  // 使用现有的 I2C 总线句柄
-    //         .freq = 100000,  // 100kHz
-    //     };
-
-    //     esp_video_init_dvp_config_t dvp_config = {
-    //         .sccb_config = sccb_config,
-    //         .reset_pin = CAMERA_PIN_RESET,
-    //         .pwdn_pin = CAMERA_PIN_PWDN,
-    //         .dvp_pin = dvp_pin_config,
-    //         .xclk_freq = 12000000,
-    //     };
-
-    //     esp_video_init_config_t video_config = {
-    //         .dvp = &dvp_config,
-    //     };
-
-    //     camera_ = new Esp32Camera(video_config);
-
-    // }
 public:
     CustomBoard() :
         boot_button_(BOOT_BUTTON_GPIO) {
@@ -152,14 +89,9 @@ public:
         InitializeTca9555();
         //InitializeSpi();
         InitializeLcdDisplay();
+        ESP_LOGI(TAG, "3.7-inch EPD board initialization complete");
+
         InitializeButtons();
-        // #ifdef LCD_TYPE_JD9853_SERIAL
-        // InitializeJd9853Display(); 
-        // #else
-        // InitializeSt7789Display(); 
-        // #endif
-        // InitializeCamera();
-        // GetBacklight()->RestoreBrightness();
     }
 
     virtual Led* GetLed() override {
@@ -177,14 +109,6 @@ public:
         return display_;
     }
     
-    // virtual Backlight* GetBacklight() override {
-    //     static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, BACKLIGHT_INVERT);
-    //     return &backlight;
-    // }
-
-    // virtual Camera* GetCamera() override {
-    //     return camera_;
-    // }
 };
 
 DECLARE_BOARD(CustomBoard);

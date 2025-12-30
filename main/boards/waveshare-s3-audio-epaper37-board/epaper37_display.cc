@@ -1,314 +1,282 @@
-#include <stdio.h>
-#include <esp_lcd_panel_io.h>
 #include "epaper37_display.h"
-#include <freertos/FreeRTOS.h>
-#include <vector>
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <string.h>
 #include "board.h"
 #include "config.h"
 #include "esp_lvgl_port.h"
-#include "settings.h"
-#include <string.h>
 
-#define TAG "Epaper37"
+#define TAG "Epaper37Display"
 
-// ---------------------------------------------------------------------------
-// Constructor
-// ---------------------------------------------------------------------------
+#define BYTES_PER_PIXEL (LV_COLOR_FORMAT_GET_SIZE(LV_COLOR_FORMAT_RGB565))
+#define BUFF_SIZE (EXAMPLE_LCD_WIDTH * EXAMPLE_LCD_HEIGHT * BYTES_PER_PIXEL)
 
-Epaper37Display::Epaper37Display(esp_lcd_panel_io_handle_t panel_io,
-                                 esp_lcd_panel_handle_t panel,
-                                 int width,
-                                 int height,
-                                 int offset_x,
-                                 int offset_y,
-                                 bool mirror_x,
-                                 bool mirror_y,
-                                 bool swap_xy,
-                                 epaper37_spi_t cfg)
-    : LcdDisplay(panel_io, panel, width, height),
-      spi_cfg(cfg),
-      Width(width),
-      Height(height)
-{
+void Epaper37Display::lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p) {
+    Epaper37Display *driver = (Epaper37Display *)lv_display_get_user_data(disp);
+    uint16_t *rgb_buffer = (uint16_t *)color_p;
+
+    // For E-paper, we usually refresh the whole screen if we are in FULL RENDER MODE
+    // The 3.7" E-paper requires the full image to be sent to registers 0x10 and 0x13
+    
+    // Convert RGB565 to 1-bit B/W
+    for (int y = 0; y < driver->Height; y++) {
+        for (int x = 0; x < driver->Width; x++) {
+            // Simple thresholding: if it's bright enough, it's white (1), otherwise black (0)
+            // RGB565: R5 G6 B5. 0x7FFF is about mid-gray.
+            uint16_t color = rgb_buffer[y * driver->Width + x];
+            uint8_t bw_color = (color > 0x7BEF) ? DRIVER_COLOR_WHITE : DRIVER_COLOR_BLACK;
+            driver->EPD_DrawColorPixel(x, y, bw_color);
+        }
+    }
+
+    // Refresh the display
+    driver->EPD_Display(driver->buffer);
+    
+    lv_display_flush_ready(disp);
+}
+
+Epaper37Display::Epaper37Display(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+                               int width, int height, int offset_x, int offset_y,
+                               bool mirror_x, bool mirror_y, bool swap_xy, epaper37_spi_t _spi_data)
+    : LcdDisplay(panel_io, panel, width, height), spi_data(_spi_data), Width(width), Height(height) {
+
     ESP_LOGI(TAG, "Initialize SPI");
     spi_port_init();
     spi_gpio_init();
 
-    // Allocate e-paper 1-bit buffers
-    buffer = (uint8_t *) heap_caps_malloc(spi_cfg.buffer_len, MALLOC_CAP_SPIRAM);
-    old_buffer = (uint8_t *) heap_caps_malloc(spi_cfg.buffer_len, MALLOC_CAP_SPIRAM);
-
-    assert(buffer);
-    assert(old_buffer);
-
-    memset(buffer, 0xFF, spi_cfg.buffer_len);
-    memset(old_buffer, 0xFF, spi_cfg.buffer_len);
-
-    ESP_LOGI(TAG, "Initialize LVGL");
+    ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
 
-    // LVGL port setup
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 2;
     port_cfg.timer_period_ms = 50;
     lvgl_port_init(&port_cfg);
     lvgl_port_lock(0);
 
-    // LVGL display object
+    // Current image buffer
+    buffer = (uint8_t *)heap_caps_malloc(spi_data.buffer_len, MALLOC_CAP_SPIRAM);
+    assert(buffer);
+    memset(buffer, 0xFF, spi_data.buffer_len);
+
+    // Old image buffer for partial refresh (required by 3.7" hardware)
+    old_buffer = (uint8_t *)heap_caps_malloc(spi_data.buffer_len, MALLOC_CAP_SPIRAM);
+    assert(old_buffer);
+    memset(old_buffer, 0xFF, spi_data.buffer_len);
+
     display_ = lv_display_create(width, height);
     lv_display_set_flush_cb(display_, lvgl_flush_cb);
     lv_display_set_user_data(display_, this);
 
-    // Allocate LVGL RGB565 framebuffer
-    size_t fb_size = width * height * 2; // RGB565 = 2 bytes/pixel
-    uint8_t *fb = (uint8_t *) heap_caps_malloc(fb_size, MALLOC_CAP_SPIRAM);
-    assert(fb);
+    // Use a full-screen RGB565 buffer for LVGL to render into
+    uint8_t *lvgl_buffer = (uint8_t *)heap_caps_malloc(BUFF_SIZE, MALLOC_CAP_SPIRAM);
+    assert(lvgl_buffer);
+    lv_display_set_buffers(display_, lvgl_buffer, NULL, BUFF_SIZE, LV_DISPLAY_RENDER_MODE_FULL);
 
-    lv_display_set_buffers(display_,
-                           fb,
-                           NULL,
-                           fb_size,
-                           LV_DISPLAY_RENDER_MODE_FULL);
-
-    ESP_LOGI(TAG, "EPD HW init");
+    ESP_LOGI(TAG, "EPD init");
     EPD_Init();
-    EPD_Clear();
-    EPD_Update();
+    EPD_Clear(); // Clear both hardware and local buffers
+    EPD_PartInit(); // Use partial refresh mode for subsequent updates
 
     lvgl_port_unlock();
+
+    if (display_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to add display");
+        return;
+    }
+
+    ESP_LOGI(TAG, "UI start");
+    SetupUI();
 }
 
-
-// ---------------------------------------------------------------------------
-// Destructor
-// ---------------------------------------------------------------------------
 Epaper37Display::~Epaper37Display() {
+    if (buffer) free(buffer);
+    if (old_buffer) free(old_buffer);
 }
-
-
-// ---------------------------------------------------------------------------
-// SPI GPIO Initialization
-// ---------------------------------------------------------------------------
 
 void Epaper37Display::spi_gpio_init() {
-    gpio_config_t io = {};
-    io.intr_type = GPIO_INTR_DISABLE;
-    io.mode = GPIO_MODE_OUTPUT;
-    io.pull_up_en = GPIO_PULLUP_ENABLE;
-    io.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io.pin_bit_mask = (1ULL << spi_cfg.cs) |
-                      (1ULL << spi_cfg.dc) |
-                      (1ULL << spi_cfg.rst);
-    gpio_config(&io);
+    gpio_config_t gpio_conf = {};
+    gpio_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_conf.mode = GPIO_MODE_OUTPUT;
+    gpio_conf.pin_bit_mask = (1ULL << spi_data.rst) | (1ULL << spi_data.dc) | (1ULL << spi_data.cs);
+    gpio_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    gpio_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    ESP_ERROR_CHECK(gpio_config(&gpio_conf));
 
-    io.mode = GPIO_MODE_INPUT;
-    io.pin_bit_mask = (1ULL << spi_cfg.busy);
-    gpio_config(&io);
+    gpio_conf.mode = GPIO_MODE_INPUT;
+    gpio_conf.pin_bit_mask = (1ULL << spi_data.busy);
+    ESP_ERROR_CHECK(gpio_config(&gpio_conf));
 
     set_rst_1();
 }
 
-
-// ---------------------------------------------------------------------------
-// SPI Bus Initialization
-// ---------------------------------------------------------------------------
-
 void Epaper37Display::spi_port_init() {
+    esp_err_t ret;
     spi_bus_config_t buscfg = {};
-    buscfg.mosi_io_num = spi_cfg.mosi;
     buscfg.miso_io_num = -1;
-    buscfg.sclk_io_num = spi_cfg.scl;
-    buscfg.max_transfer_sz = spi_cfg.buffer_len + 64; // Safe size
-
-    spi_bus_initialize((spi_host_device_t)spi_cfg.spi_host,
-                       &buscfg,
-                       SPI_DMA_CH_AUTO);
+    buscfg.mosi_io_num = spi_data.mosi;
+    buscfg.sclk_io_num = spi_data.scl;
+    buscfg.quadwp_io_num = -1;
+    buscfg.quadhd_io_num = -1;
+    buscfg.max_transfer_sz = spi_data.buffer_len;
 
     spi_device_interface_config_t devcfg = {};
-    devcfg.spics_io_num = -1;
-    devcfg.clock_speed_hz = 20 * 1000 * 1000; // stable 20MHz
+    devcfg.spics_io_num = -1; // We handle CS manually
+    devcfg.clock_speed_hz = 20 * 1000 * 1000;
     devcfg.mode = 0;
     devcfg.queue_size = 7;
 
-    spi_bus_add_device((spi_host_device_t)spi_cfg.spi_host,
-                       &devcfg,
-                       &spi);
+    ret = spi_bus_initialize((spi_host_device_t)spi_data.spi_host, &buscfg, SPI_DMA_CH_AUTO);
+    ESP_ERROR_CHECK(ret);
+    ret = spi_bus_add_device((spi_host_device_t)spi_data.spi_host, &devcfg, &spi);
+    ESP_ERROR_CHECK(ret);
 }
 
-
-// ---------------------------------------------------------------------------
-// Busy wait
-// ---------------------------------------------------------------------------
-
 void Epaper37Display::read_busy() {
-    while (gpio_get_level((gpio_num_t)spi_cfg.busy) == 0) {
-        vTaskDelay(pdMS_TO_TICKS(5));
+    // STM32 code: while(EPD_ReadBusy==0);
+    // This means it waits for BUSY to become 1 (idle).
+    while (gpio_get_level((gpio_num_t)spi_data.busy) == 0) {
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
-
-// ---------------------------------------------------------------------------
-// SPI Commands
-// ---------------------------------------------------------------------------
-
-void Epaper37Display::sendCommand(uint8_t cmd) {
-    set_dc_0();
-    set_cs_0();
-    spi_transaction_t t = {};
-    t.length = 8;
-    t.tx_buffer = &cmd;
-    spi_device_polling_transmit(spi, &t);
-    set_cs_1();
-}
-
-void Epaper37Display::sendData(uint8_t data) {
-    set_dc_1();
-    set_cs_0();
-    spi_transaction_t t = {};
+void Epaper37Display::SPI_SendByte(uint8_t data) {
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
     t.length = 8;
     t.tx_buffer = &data;
     spi_device_polling_transmit(spi, &t);
+}
+
+void Epaper37Display::EPD_SendData(uint8_t data) {
+    set_dc_1();
+    set_cs_0();
+    SPI_SendByte(data);
+    set_cs_1();
+}
+
+void Epaper37Display::EPD_SendCommand(uint8_t command) {
+    set_dc_0();
+    set_cs_0();
+    SPI_SendByte(command);
     set_cs_1();
 }
 
 void Epaper37Display::writeBytes(const uint8_t *data, int len) {
+    if (len <= 0) return;
     set_dc_1();
     set_cs_0();
-    spi_transaction_t t = {};
-    t.length = len * 8;
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = 8 * len;
     t.tx_buffer = data;
     spi_device_polling_transmit(spi, &t);
     set_cs_1();
 }
 
-
-// ---------------------------------------------------------------------------
-// E-Ink Driver Logic (from STM32 sample, correct for this panel)
-// ---------------------------------------------------------------------------
-
 void Epaper37Display::EPD_Init() {
-    set_rst_1(); vTaskDelay(pdMS_TO_TICKS(100));
-    set_rst_0(); vTaskDelay(pdMS_TO_TICKS(20));
-    set_rst_1(); vTaskDelay(pdMS_TO_TICKS(20));
-
+    set_rst_0();
+    vTaskDelay(pdMS_TO_TICKS(20));
+    set_rst_1();
+    vTaskDelay(pdMS_TO_TICKS(20));
     read_busy();
 
-    sendCommand(0x00);
-    sendData(0x1B);
+    EPD_SendCommand(0x00);
+    EPD_SendData(0x1B);
 }
 
-void Epaper37Display::EPD_FastInit() {
-    set_rst_1(); vTaskDelay(pdMS_TO_TICKS(100));
-    set_rst_0(); vTaskDelay(pdMS_TO_TICKS(20));
-    set_rst_1(); vTaskDelay(pdMS_TO_TICKS(20));
+void Epaper37Display::EPD_Update() {
+    EPD_SendCommand(0x04); // Power ON
     read_busy();
+    EPD_SendCommand(0x12); // Display Refresh
+    read_busy();
+}
 
-    sendCommand(0x00);
-    sendData(0x1B);
-
-    sendCommand(0xE0);
-    sendData(0x02);
-
-    sendCommand(0xE5);
-    sendData(0x5F);
+void Epaper37Display::EPD_DeepSleep() {
+    EPD_SendCommand(0x02); // Power OFF
+    read_busy();
+    EPD_SendCommand(0x07); // Deep Sleep
+    EPD_SendData(0xA5);
 }
 
 void Epaper37Display::EPD_PartInit() {
-    set_rst_1(); vTaskDelay(pdMS_TO_TICKS(100));
-    set_rst_0(); vTaskDelay(pdMS_TO_TICKS(20));
-    set_rst_1(); vTaskDelay(pdMS_TO_TICKS(20));
+    set_rst_0();
+    vTaskDelay(pdMS_TO_TICKS(20));
+    set_rst_1();
+    vTaskDelay(pdMS_TO_TICKS(20));
     read_busy();
 
-    sendCommand(0x00);
-    sendData(0x1B);
-
-    sendCommand(0xE0);
-    sendData(0x02);
-
-    sendCommand(0xE5);
-    sendData(0x6E);
+    EPD_SendCommand(0x00);
+    EPD_SendData(0x1B);
+    EPD_SendCommand(0xE0);
+    EPD_SendData(0x02);
+    EPD_SendCommand(0xE5);
+    EPD_SendData(0x6E);
 }
 
+void Epaper37Display::EPD_FastInit() {
+    set_rst_0();
+    vTaskDelay(pdMS_TO_TICKS(20));
+    set_rst_1();
+    vTaskDelay(pdMS_TO_TICKS(20));
+    read_busy();
+
+    EPD_SendCommand(0x00);
+    EPD_SendData(0x1B);
+    EPD_SendCommand(0xE0);
+    EPD_SendData(0x02);
+    EPD_SendCommand(0xE5);
+    EPD_SendData(0x5F);
+}
+
+void Epaper37Display::EPD_Display(const uint8_t *image) {
+    int data_len = Width * Height / 8;
+    // Send old image
+    EPD_SendCommand(0x10);
+    writeBytes(old_buffer, data_len);
+
+    // Send new image
+    EPD_SendCommand(0x13);
+    writeBytes(image, data_len);
+
+    // Update hardware
+    EPD_Update();
+
+    // Update local old buffer
+    memcpy(old_buffer, image, data_len);
+}
 
 void Epaper37Display::EPD_Clear() {
-    int W = (Width + 7) / 8;
-    int H = Height;
-    int size = W * H;
-
-    sendCommand(0x10);
-    writeBytes(old_buffer, size);
-
-    memset(buffer, 0xFF, size);
-    sendCommand(0x13);
-    writeBytes(buffer, size);
-
-    memcpy(old_buffer, buffer, size);
+    int data_len = Width * Height / 8;
+    // Clear hardware display to white
+    memset(buffer, 0xFF, spi_data.buffer_len);
+    
+    // According to STM32 driver EPD_Display_Clear:
+    // It sends oldImage to 0x10 and 0xFF to 0x13
+    EPD_SendCommand(0x10);
+    writeBytes(old_buffer, data_len);
+    
+    EPD_SendCommand(0x13);
+    writeBytes(buffer, data_len);
+    
+    EPD_Update();
+    
+    // Sync local buffers
+    memset(old_buffer, 0xFF, spi_data.buffer_len);
+    memset(buffer, 0xFF, spi_data.buffer_len);
 }
-
-
-void Epaper37Display::EPD_Display() {
-    int size = spi_cfg.buffer_len;
-
-    sendCommand(0x10);
-    writeBytes(old_buffer, size);
-
-    sendCommand(0x13);
-    writeBytes(buffer, size);
-
-    memcpy(old_buffer, buffer, size);
-}
-
-
-void Epaper37Display::EPD_Update() {
-    sendCommand(0x04);
-    read_busy();
-
-    sendCommand(0x12);
-    read_busy();
-}
-
-
-void Epaper37Display::EPD_DeepSleep() {
-    sendCommand(0x02);
-    read_busy();
-    sendCommand(0x07);
-    sendData(0xA5);
-}
-
-
-// ---------------------------------------------------------------------------
-// DrawPixel (1-bit)
-// ---------------------------------------------------------------------------
 
 void Epaper37Display::EPD_DrawColorPixel(uint16_t x, uint16_t y, uint8_t color) {
     if (x >= Width || y >= Height) return;
 
-    int rowBytes = (Width + 7) / 8;
+    // 240x416 resolution. Width is 240 bits (30 bytes).
+    // index = y * (Width/8) + (x/8)
+    uint16_t index = y * (Width / 8) + (x / 8);
+    uint8_t bit = 7 - (x % 8);
 
-    uint32_t index = y * rowBytes + (x >> 3);
-    uint8_t bit = 7 - (x & 7);
-
-    if (color)
+    if (color == DRIVER_COLOR_WHITE) {
         buffer[index] |= (1 << bit);
-    else
+    } else {
         buffer[index] &= ~(1 << bit);
-}
-
-
-// ---------------------------------------------------------------------------
-// LVGL Flush Callback
-// ---------------------------------------------------------------------------
-
-void Epaper37Display::lvgl_flush_cb(lv_display_t *disp,
-                                    const lv_area_t *area,
-                                    uint8_t *color_p)
-{
-    Epaper37Display *driver =
-        (Epaper37Display *) lv_display_get_user_data(disp);
-
-    driver->EPD_Display();
-    driver->EPD_Update();
-
-    lv_disp_flush_ready(disp);
+    }
 }

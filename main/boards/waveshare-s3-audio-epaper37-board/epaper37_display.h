@@ -1,71 +1,68 @@
-#ifndef __EPAPER37_DISPLAY_H__
-#define __EPAPER37_DISPLAY_H__
+#ifndef EPAPER37_DISPLAY_H
+#define EPAPER37_DISPLAY_H
 
 #include <driver/gpio.h>
+#include <driver/spi_master.h>
 #include "lcd_display.h"
 
+/* Display color */
+typedef enum {
+    DRIVER_COLOR_WHITE  = 0xff,
+    DRIVER_COLOR_BLACK  = 0x00,
+} COLOR_IMAGE;
+
 typedef struct {
-    uint8_t cs;//3
-    uint8_t dc;//7
-    uint8_t rst;//5
-    uint8_t busy;//6
-    uint8_t mosi;//9
-    uint8_t scl;//4
+    uint8_t cs;
+    uint8_t dc;
+    uint8_t rst;
+    uint8_t busy;
+    uint8_t mosi;
+    uint8_t scl;
     int spi_host;
     int buffer_len;
 } epaper37_spi_t;
 
 class Epaper37Display : public LcdDisplay {
 public:
-    Epaper37Display(esp_lcd_panel_io_handle_t panel_io,
-                    esp_lcd_panel_handle_t panel,
-                    int width,
-                    int height,
-                    int offset_x,
-                    int offset_y,
-                    bool mirror_x,
-                    bool mirror_y,
-                    bool swap_xy,
-                    epaper37_spi_t cfg);
-
+    Epaper37Display(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
+                  int width, int height, int offset_x, int offset_y,
+                  bool mirror_x, bool mirror_y, bool swap_xy, epaper37_spi_t _spi_data);
     ~Epaper37Display();
 
     void EPD_Init();
-    void EPD_FastInit();
-    void EPD_PartInit();
-    void EPD_Clear();
-    void EPD_Display();
     void EPD_Update();
     void EPD_DeepSleep();
-
+    void EPD_PartInit();
+    void EPD_FastInit();
+    void EPD_Display(const uint8_t *image);
+    void EPD_Clear();
     void EPD_DrawColorPixel(uint16_t x, uint16_t y, uint8_t color);
 
 private:
-    static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p);
-
-    void spi_port_init();
-    void spi_gpio_init();
-    void read_busy();
-
-    void sendCommand(uint8_t cmd);
-    void sendData(uint8_t data);
-    void writeBytes(const uint8_t *data, int len);
-
-    inline void set_cs_1() { gpio_set_level((gpio_num_t)spi_cfg.cs, 1); }
-    inline void set_cs_0() { gpio_set_level((gpio_num_t)spi_cfg.cs, 0); }
-    inline void set_dc_1() { gpio_set_level((gpio_num_t)spi_cfg.dc, 1); }
-    inline void set_dc_0() { gpio_set_level((gpio_num_t)spi_cfg.dc, 0); }
-    inline void set_rst_1(){ gpio_set_level((gpio_num_t)spi_cfg.rst, 1); }
-    inline void set_rst_0(){ gpio_set_level((gpio_num_t)spi_cfg.rst, 0); }
-
-private:
-    const epaper37_spi_t spi_cfg;
+    const epaper37_spi_t spi_data;
     const int Width;
     const int Height;
-
     spi_device_handle_t spi;
-    uint8_t *buffer = NULL;      // Current frame (1-bit)
-    uint8_t *old_buffer = NULL;  // Previous frame (1-bit)
+    uint8_t *buffer = nullptr;
+    uint8_t *old_buffer = nullptr;
+
+    static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p);
+
+    void spi_gpio_init();
+    void spi_port_init();
+    void read_busy();
+
+    void set_cs_1() { gpio_set_level((gpio_num_t)spi_data.cs, 1); }
+    void set_cs_0() { gpio_set_level((gpio_num_t)spi_data.cs, 0); }
+    void set_dc_1() { gpio_set_level((gpio_num_t)spi_data.dc, 1); }
+    void set_dc_0() { gpio_set_level((gpio_num_t)spi_data.dc, 0); }
+    void set_rst_1() { gpio_set_level((gpio_num_t)spi_data.rst, 1); }
+    void set_rst_0() { gpio_set_level((gpio_num_t)spi_data.rst, 0); }
+
+    void SPI_SendByte(uint8_t data);
+    void EPD_SendData(uint8_t data);
+    void EPD_SendCommand(uint8_t command);
+    void writeBytes(const uint8_t *buffer, int len);
 };
 
-#endif
+#endif // EPAPER37_DISPLAY_H

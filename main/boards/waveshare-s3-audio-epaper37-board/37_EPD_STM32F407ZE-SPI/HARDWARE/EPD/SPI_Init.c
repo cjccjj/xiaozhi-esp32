@@ -3,36 +3,42 @@
 void EPD_GPIOInit(void)
 {
 	GPIO_InitTypeDef GPIO_InitStructure;
-	RCC_APB2PeriphClockCmd(EPD_SCL_GPIO_CLK|EPD_SDA_GPIO_CLK|EPD_RES_GPIO_CLK
+	RCC_AHB1PeriphClockCmd(EPD_SCL_GPIO_CLK|EPD_SDA_GPIO_CLK|EPD_RES_GPIO_CLK
 												 |EPD_DC_GPIO_CLK|EPD_CS_GPIO_CLK|EPD_BUSY_GPIO_CLK,ENABLE);
 	
 	GPIO_InitStructure.GPIO_Pin=EPD_SCL_GPIO_PIN;
-  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_Out_PP;
-	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType=GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_100MHz;
 	GPIO_Init(EPD_SCL_GPIO_PORT,&GPIO_InitStructure);
 	
 	GPIO_InitStructure.GPIO_Pin=EPD_SDA_GPIO_PIN;
-  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_Out_PP;
-	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType=GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_100MHz;
 	GPIO_Init(EPD_SDA_GPIO_PORT,&GPIO_InitStructure);
 	
 	GPIO_InitStructure.GPIO_Pin=EPD_RES_GPIO_PIN;
-  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_Out_PP;
-	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType=GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_100MHz;
 	GPIO_Init(EPD_RES_GPIO_PORT,&GPIO_InitStructure);
 	
 	GPIO_InitStructure.GPIO_Pin=EPD_DC_GPIO_PIN;
-  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_Out_PP;
-	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType=GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_100MHz;
 	GPIO_Init(EPD_DC_GPIO_PORT,&GPIO_InitStructure);
 	
 	GPIO_InitStructure.GPIO_Pin=EPD_CS_GPIO_PIN;
-  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_Out_PP;
-	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_50MHz;
+  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_OType=GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_Speed=GPIO_Speed_100MHz;
 	GPIO_Init(EPD_CS_GPIO_PORT,&GPIO_InitStructure);
 	
 	GPIO_InitStructure.GPIO_Pin=EPD_BUSY_GPIO_PIN;
-  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_IPU;
+  GPIO_InitStructure.GPIO_Mode =GPIO_Mode_IN;
+	GPIO_InitStructure.GPIO_PuPd=GPIO_PuPd_UP;
 	GPIO_Init(EPD_BUSY_GPIO_PORT,&GPIO_InitStructure);
 	
 }
