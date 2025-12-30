@@ -22,6 +22,9 @@ typedef struct {
     int buffer_len;
 } epaper37_spi_t;
 
+#define PANEL_WIDTH 240
+#define PANEL_HEIGHT 416
+
 class Epaper37Display : public LcdDisplay {
 public:
     Epaper37Display(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,

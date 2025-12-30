@@ -35,8 +35,8 @@
 #define EPD_RST_PIN   GPIO_NUM_5
 #define EPD_BUSY_PIN  GPIO_NUM_6
 
-#define EXAMPLE_LCD_WIDTH   240
-#define EXAMPLE_LCD_HEIGHT  416
+#define EXAMPLE_LCD_WIDTH   416
+#define EXAMPLE_LCD_HEIGHT  240
 /*EPD end*/
 /*DEV POWER init*/
 // #define EPD_PWR_PIN     GPIO_NUM_6

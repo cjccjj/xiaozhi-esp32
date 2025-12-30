@@ -10,7 +10,8 @@
 #define TAG "Epaper37Display"
 
 #define BYTES_PER_PIXEL (LV_COLOR_FORMAT_GET_SIZE(LV_COLOR_FORMAT_RGB565))
-#define BUFF_SIZE (EXAMPLE_LCD_WIDTH * EXAMPLE_LCD_HEIGHT * BYTES_PER_PIXEL)
+#define BUFF_SIZE (PANEL_WIDTH * PANEL_HEIGHT * BYTES_PER_PIXEL)
+#define PANEL_BUFFER_SIZE (PANEL_WIDTH * PANEL_HEIGHT / 8)
 
 void Epaper37Display::lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *color_p) {
     Epaper37Display *driver = (Epaper37Display *)lv_display_get_user_data(disp);
@@ -18,7 +19,6 @@ void Epaper37Display::lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, u
 
     // According to STM32 example main.c:
     // while(1) { EPD_PartInit(); ... EPD_Display(); EPD_Update(); delay; }
-    // We call EPD_PartInit() here to ensure the hardware is in the correct state for partial update.
     driver->EPD_PartInit();
     
     // Convert RGB565 to 1-bit B/W using luminance threshold
@@ -37,7 +37,6 @@ void Epaper37Display::lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, u
             uint16_t b8 = (b * 255) / 31;
             
             // Calculate luminance: Y = 0.299R + 0.587G + 0.114B
-            // Integer math: (r*76 + g*150 + b*29) >> 8
             uint16_t luminance = (r8 * 76 + g8 * 150 + b8 * 29) >> 8;
             
             // Use 128 as threshold for B/W
@@ -46,7 +45,7 @@ void Epaper37Display::lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, u
         }
     }
 
-    // Refresh the display (EPD_Display calls EPD_Update)
+    // Refresh the display
     driver->EPD_Display(driver->buffer);
     
     lv_display_flush_ready(disp);
@@ -71,29 +70,30 @@ Epaper37Display::Epaper37Display(esp_lcd_panel_io_handle_t panel_io, esp_lcd_pan
     lvgl_port_init(&port_cfg);
     lvgl_port_lock(0);
 
-    // Current image buffer
-    buffer = (uint8_t *)heap_caps_malloc(spi_data.buffer_len, MALLOC_CAP_SPIRAM);
+    // Current image buffer - Always PANEL_BUFFER_SIZE
+    buffer = (uint8_t *)heap_caps_malloc(PANEL_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
     assert(buffer);
-    memset(buffer, 0xFF, spi_data.buffer_len);
+    memset(buffer, 0xFF, PANEL_BUFFER_SIZE);
 
     // Old image buffer for partial refresh (required by 3.7" hardware)
-    old_buffer = (uint8_t *)heap_caps_malloc(spi_data.buffer_len, MALLOC_CAP_SPIRAM);
+    old_buffer = (uint8_t *)heap_caps_malloc(PANEL_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
     assert(old_buffer);
-    memset(old_buffer, 0xFF, spi_data.buffer_len);
+    memset(old_buffer, 0xFF, PANEL_BUFFER_SIZE);
 
     display_ = lv_display_create(width, height);
     lv_display_set_flush_cb(display_, lvgl_flush_cb);
     lv_display_set_user_data(display_, this);
 
-    // Use a full-screen RGB565 buffer for LVGL to render into
-    uint8_t *lvgl_buffer = (uint8_t *)heap_caps_malloc(BUFF_SIZE, MALLOC_CAP_SPIRAM);
+    // Use a full-screen RGB565 buffer for LVGL to render into (Width x Height)
+    size_t lvgl_buffer_size = Width * Height * BYTES_PER_PIXEL;
+    uint8_t *lvgl_buffer = (uint8_t *)heap_caps_malloc(lvgl_buffer_size, MALLOC_CAP_SPIRAM);
     assert(lvgl_buffer);
-    lv_display_set_buffers(display_, lvgl_buffer, NULL, BUFF_SIZE, LV_DISPLAY_RENDER_MODE_FULL);
+    lv_display_set_buffers(display_, lvgl_buffer, NULL, lvgl_buffer_size, LV_DISPLAY_RENDER_MODE_FULL);
 
-    ESP_LOGI(TAG, "EPD init");
+    ESP_LOGI(TAG, "EPD init (Full Slow Refresh)");
     EPD_Init();
-    EPD_Clear(); // Clear both hardware and local buffers
-    EPD_PartInit(); // Use partial refresh mode for subsequent updates
+    EPD_Clear(); // Performs full refresh to clear screen
+    EPD_PartInit(); // Switch to partial mode for LVGL updates
 
     lvgl_port_unlock();
 
@@ -202,6 +202,7 @@ void Epaper37Display::EPD_HW_RESET() {
 
 void Epaper37Display::EPD_Init() {
     EPD_HW_RESET();
+    read_busy();
 
     EPD_SendCommand(0x00);
     EPD_SendData(0x1B);
@@ -223,6 +224,7 @@ void Epaper37Display::EPD_DeepSleep() {
 
 void Epaper37Display::EPD_PartInit() {
     EPD_HW_RESET();
+    read_busy();
 
     EPD_SendCommand(0x00);
     EPD_SendData(0x1B);
@@ -234,6 +236,7 @@ void Epaper37Display::EPD_PartInit() {
 
 void Epaper37Display::EPD_FastInit() {
     EPD_HW_RESET();
+    read_busy();
 
     EPD_SendCommand(0x00);
     EPD_SendData(0x1B);
@@ -244,7 +247,7 @@ void Epaper37Display::EPD_FastInit() {
 }
 
 void Epaper37Display::EPD_Display(const uint8_t *image) {
-    int data_len = Width * Height / 8;
+    int data_len = PANEL_WIDTH * PANEL_HEIGHT / 8;
     // Send old image
     EPD_SendCommand(0x10);
     writeBytes(old_buffer, data_len);
@@ -261,9 +264,9 @@ void Epaper37Display::EPD_Display(const uint8_t *image) {
 }
 
 void Epaper37Display::EPD_Clear() {
-    int data_len = Width * Height / 8;
+    int data_len = PANEL_WIDTH * PANEL_HEIGHT / 8;
     // Clear hardware display to white
-    memset(buffer, 0xFF, spi_data.buffer_len);
+    memset(buffer, 0xFF, PANEL_BUFFER_SIZE);
     
     // According to STM32 driver EPD_Display_Clear:
     // It sends oldImage to 0x10 and 0xFF to 0x13
@@ -276,33 +279,39 @@ void Epaper37Display::EPD_Clear() {
     EPD_Update();
     
     // Sync local buffers
-    memset(old_buffer, 0xFF, spi_data.buffer_len);
-    memset(buffer, 0xFF, spi_data.buffer_len);
+    memset(old_buffer, 0xFF, PANEL_BUFFER_SIZE);
+    memset(buffer, 0xFF, PANEL_BUFFER_SIZE);
 }
 
 void Epaper37Display::EPD_DrawColorPixel(uint16_t x, uint16_t y, uint8_t color) {
-    uint16_t _x = x;
-    uint16_t _y = y;
+    // LVGL coordinates (x, y) where x is [0, 415] and y is [0, 239]
+    // We want 90-degree clockwise rotation to physical panel (240x416)
+    // Physical X = (PANEL_WIDTH - 1) - y = 239 - y
+    // Physical Y = x
+    
+    if (x >= Width || y >= Height) return;
 
+    uint16_t _x = (PANEL_WIDTH - 1) - y;
+    uint16_t _y = x;
+
+    // Apply any additional mirroring if specified in config
+    if (mirror_x) {
+        _x = (PANEL_WIDTH - 1) - _x;
+    }
+    if (mirror_y) {
+        _y = (PANEL_HEIGHT - 1) - _y;
+    }
     if (swap_xy) {
         uint16_t tmp = _x;
         _x = _y;
         _y = tmp;
     }
 
-    if (mirror_x) {
-        _x = Width - 1 - _x;
-    }
+    if (_x >= PANEL_WIDTH || _y >= PANEL_HEIGHT) return;
 
-    if (mirror_y) {
-        _y = Height - 1 - _y;
-    }
-
-    if (_x >= Width || _y >= Height) return;
-
-    // 240x416 resolution. Width is 240 bits (30 bytes).
-    // index = y * (Width/8) + (x/8)
-    uint16_t index = _y * (Width / 8) + (_x / 8);
+    // 240x416 resolution. Physical Width is 240 bits (30 bytes).
+    // index = y * (PANEL_WIDTH/8) + (x/8)
+    uint16_t index = _y * (PANEL_WIDTH / 8) + (_x / 8);
     uint8_t bit = 7 - (_x % 8);
 
     if (color == DRIVER_COLOR_WHITE) {
