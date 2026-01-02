@@ -262,6 +262,7 @@ void Epaper37Display::EPD_Update() {
     read_busy();
     EPD_SendCommand(0x12); // Display Refresh
     read_busy();
+    EPD_SendCommand(0x02); // Power OFF
 }
 
 void Epaper37Display::EPD_DeepSleep() {
