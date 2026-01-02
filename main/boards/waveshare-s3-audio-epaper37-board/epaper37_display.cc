@@ -239,7 +239,7 @@ void Epaper37Display::writeBytes(const uint8_t *data, int len) {
 }
 
 void Epaper37Display::EPD_HW_RESET() {
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(5)); //no need to wait?
     set_rst_0();
     vTaskDelay(pdMS_TO_TICKS(20));
     set_rst_1();
